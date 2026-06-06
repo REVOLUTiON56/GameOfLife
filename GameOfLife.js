@@ -26,11 +26,15 @@ class GameOfLife {
         this.grid.fill(0);
     }
 
-    // Переключение состояния одной клетки (для кликов мыши)
-    toggleCell(x, y, forceAlive = false) {
+    getCell(x, y) {
+        if (x < 0 || x >= this.width || y < 0 || y >= this.height) return 0;
+        return this.grid[this.getIndex(x, y)];
+    }
+
+    // Установить конкретное состояние (0 или 1)
+    setCell(x, y, state) {
         if (x < 0 || x >= this.width || y < 0 || y >= this.height) return;
-        const idx = this.getIndex(x, y);
-        this.grid[idx] = forceAlive ? 1 : (this.grid[idx] ? 0 : 1);
+        this.grid[this.getIndex(x, y)] = state;
     }
 
     // Шаг эволюции (расчет следующего поколения)
@@ -145,21 +149,34 @@ class GameController {
             };
         };
 
+        // Режим кисти: 1 - рисуем (оживляем), 0 - стираем (убиваем)
+        let drawMode = 1; 
+
         canvas.addEventListener('mousedown', (e) => {
             this.isDrawing = true;
             const pos = getMousePos(e);
-            this.game.toggleCell(pos.x, pos.y);
+            
+            // Смотрим, куда кликнули. Если там живая клетка (1) - переключаемся в режим стирания (0).
+            // Если пустая (0) - переключаемся в режим рисования (1).
+            const currentState = this.game.getCell(pos.x, pos.y);
+            drawMode = currentState === 1 ? 0 : 1;
+            
+            // Сразу применяем действие к клетке под курсором
+            this.game.setCell(pos.x, pos.y, drawMode);
             this.renderer.draw();
         });
 
         canvas.addEventListener('mousemove', (e) => {
             if (!this.isDrawing) return;
             const pos = getMousePos(e);
-            // При движении мыши только "зажигаем" клетки (forceAlive = true)
-            this.game.toggleCell(pos.x, pos.y, true); 
+            
+            // При движении применяем запомненный режим
+            this.game.setCell(pos.x, pos.y, drawMode);
             this.renderer.draw();
         });
 
+        // Вешаем mouseup на window, чтобы рисование корректно прерывалось, 
+        // даже если курсор ушел за пределы canvas и кнопку отпустили там
         window.addEventListener('mouseup', () => {
             this.isDrawing = false;
         });
