@@ -1,267 +1,208 @@
-class Game {
-    constructor(canvas, width, height, cellSize, delay) {
-        this.gameActive = false;
-
-        this.cells = new Array(height);
-        this.neighboursCountArray = new Array(height);
-        for (var i = 0; i < height; i++) {
-            this.cells[i] = new Array(width);
-            this.neighboursCountArray[i] = new Array(width);
-            for (var j = 0; j < width; j++) {
-                this.cells[i][j] = new Cell(i, j);
-                this.neighboursCountArray[i][j] = 0;
-            }
-        }
-
-        this.board = new Board(canvas, width, height, cellSize, this.cells);
-        this.board.clear();
-        this._delay = delay;
-
-        this.myInterval;
-
-        var self = this;
-        this.updateFunc = function () {
-            if (!self.gameActive) return;
-            self.step();
-        };
+class GameOfLife {
+    constructor(width, height) {
+        this.width = width;
+        this.height = height;
+        this.size = width * height;
+        
+        // 0 - мертвая клетка, 1 - живая.
+        this.grid = new Uint8Array(this.size);
+        this.nextGrid = new Uint8Array(this.size);
     }
 
-    get delay() {
-        return this._delay;
+    // Преобразование 2D координат в 1D индекс
+    getIndex(x, y) {
+        return y * this.width + x;
     }
 
-    set delay(newValue) {
-        if (newValue < 50)
-            newValue = 50;
-        if (newValue > 3000)
-            newValue = 3000;
-
-        this._delay = newValue;
-        if (this.gameActive) {
-            clearInterval(this.myInterval);
-            this.myInterval = setInterval(this.updateFunc, this._delay);
+    // Заполнение случайными значениями
+    fillRandom() {
+        for (let i = 0; i < this.size; i++) {
+            this.grid[i] = Math.random() > 0.5 ? 1 : 0;
         }
     }
 
+    // Очистка поля
+    clear() {
+        this.grid.fill(0);
+    }
+
+    // Переключение состояния одной клетки (для кликов мыши)
+    toggleCell(x, y, forceAlive = false) {
+        if (x < 0 || x >= this.width || y < 0 || y >= this.height) return;
+        const idx = this.getIndex(x, y);
+        this.grid[idx] = forceAlive ? 1 : (this.grid[idx] ? 0 : 1);
+    }
+
+    // Шаг эволюции (расчет следующего поколения)
     step() {
-        //calculate neigbours
-        var i, j;
-        for (i = 0; i < this.cells.length; i++) {
-            for (j = 0; j < this.cells[i].length; j++) {
-                this.neighboursCountArray[i][j] = this.calculateNeighboursCount(i, j);
+        for (let y = 0; y < this.height; y++) {
+            for (let x = 0; x < this.width; x++) {
+                const idx = this.getIndex(x, y);
+                let neighbors = 0;
+
+                // Быстрый подсчет соседей без создания лишних объектов
+                const top = y > 0;
+                const bottom = y < this.height - 1;
+                const left = x > 0;
+                const right = x < this.width - 1;
+
+                if (top && left && this.grid[idx - this.width - 1]) neighbors++;
+                if (top && this.grid[idx - this.width]) neighbors++;
+                if (top && right && this.grid[idx - this.width + 1]) neighbors++;
+                
+                if (left && this.grid[idx - 1]) neighbors++;
+                if (right && this.grid[idx + 1]) neighbors++;
+                
+                if (bottom && left && this.grid[idx + this.width - 1]) neighbors++;
+                if (bottom && this.grid[idx + this.width]) neighbors++;
+                if (bottom && right && this.grid[idx + this.width + 1]) neighbors++;
+
+                // Применение правил Конвея
+                const isAlive = this.grid[idx] === 1;
+                if (isAlive && (neighbors === 2 || neighbors === 3)) {
+                    this.nextGrid[idx] = 1; // Выживает
+                } else if (!isAlive && neighbors === 3) {
+                    this.nextGrid[idx] = 1; // Зарождается
+                } else {
+                    this.nextGrid[idx] = 0; // Умирает (от одиночества или перенаселения)
+                }
             }
         }
-        //change states
-        for (i = 0; i < this.cells.length; i++) {
-            for (j = 0; j < this.cells[i].length; j++) {
-                var state = this.cells[i][j].state;
-                if (state) {
-                    //rule1
-                    if (this.neighboursCountArray[i][j] < 2 || this.neighboursCountArray[i][j] > 3) {
-                        this.cells[i][j].state = false;
-                        this.board.print(this.cells[i][j]);
-                    }
 
-                    //rule2
-                    if (this.neighboursCountArray[i][j] === 2 || this.neighboursCountArray[i][j] === 3)
-                        this.cells[i][j].state = true;
-                }
-                else {
-                    if (this.neighboursCountArray[i][j] === 3) {
-                        this.cells[i][j].state = true;
-                        this.board.print(this.cells[i][j]);
-                    }
-                }
+        [this.grid, this.nextGrid] = [this.nextGrid, this.grid];
+    }
+}
+
+class GameRenderer {
+    constructor(canvas, game, cellSize) {
+        this.canvas = canvas;
+        this.ctx = canvas.getContext('2d');
+        this.game = game;
+        this.cellSize = cellSize;
+
+        this.canvas.width = game.width * cellSize;
+        this.canvas.height = game.height * cellSize;
+    }
+
+    draw() {
+        // Очищаем фон
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+        // Рисуем сетку (оптимизировано: рисуем только линии, а не квадраты)
+        this.ctx.strokeStyle = '#add8e6'; // lightblue
+        this.ctx.lineWidth = 1;
+        this.ctx.beginPath();
+        for (let x = 0; x <= this.canvas.width; x += this.cellSize) {
+            this.ctx.moveTo(x, 0);
+            this.ctx.lineTo(x, this.canvas.height);
+        }
+        for (let y = 0; y <= this.canvas.height; y += this.cellSize) {
+            this.ctx.moveTo(0, y);
+            this.ctx.lineTo(this.canvas.width, y);
+        }
+        this.ctx.stroke();
+
+        // Рисуем только живые клетки
+        this.ctx.fillStyle = '#000000';
+        for (let i = 0; i < this.game.size; i++) {
+            if (this.game.grid[i] === 1) {
+                const x = i % this.game.width;
+                const y = Math.floor(i / this.game.width);
+                this.ctx.fillRect(
+                    x * this.cellSize, 
+                    y * this.cellSize, 
+                    this.cellSize, 
+                    this.cellSize
+                );
             }
         }
     }
+}
 
-    calculateNeighboursCount(i, j) {
-        var count = 0;
+// 3. Контроллер (Управление состоянием, циклом и событиями)
+class GameController {
+    constructor(canvas, width, height, cellSize, delay) {
+        this.game = new GameOfLife(width, height);
+        this.renderer = new GameRenderer(canvas, this.game, cellSize);
+        
+        this.delay = delay;
+        this.isRunning = false;
+        this.lastTime = 0;
+        this.animationId = null;
+        this.isDrawing = false;
 
-        var start = {
-            x: i > 0 ? i - 1 : 0,
-            y: j > 0 ? j - 1 : 0
+        this.bindEvents(canvas, cellSize);
+        this.renderer.draw(); // Первичная отрисовка пустой сетки
+    }
+
+    bindEvents(canvas, cellSize) {
+        const getMousePos = (e) => {
+            const rect = canvas.getBoundingClientRect();
+            return {
+                x: Math.floor((e.clientX - rect.left) / cellSize),
+                y: Math.floor((e.clientY - rect.top) / cellSize)
+            };
         };
 
-        var end = {
-            x: i < this.cells.length - 1 ? i + 1 : this.cells.length - 1,
-            y: j < this.cells[i].length - 1 ? j + 1 : this.cells[i].length - 1
-        };
+        canvas.addEventListener('mousedown', (e) => {
+            this.isDrawing = true;
+            const pos = getMousePos(e);
+            this.game.toggleCell(pos.x, pos.y);
+            this.renderer.draw();
+        });
 
-        for (var m = start.x; m <= end.x; m++) {
-            for (var n = start.y; n <= end.y; n++) {
-                if (m === i && n === j) continue;
-                if (this.cells[m][n].state)
-                    count++;
+        canvas.addEventListener('mousemove', (e) => {
+            if (!this.isDrawing) return;
+            const pos = getMousePos(e);
+            // При движении мыши только "зажигаем" клетки (forceAlive = true)
+            this.game.toggleCell(pos.x, pos.y, true); 
+            this.renderer.draw();
+        });
 
-                if (count >= 4) break;
-            }
+        window.addEventListener('mouseup', () => {
+            this.isDrawing = false;
+        });
+    }
+
+    // Игровой цикл с использованием requestAnimationFrame
+    loop = (timestamp) => {
+        if (!this.isRunning) return;
+
+        if (timestamp - this.lastTime >= this.delay) {
+            this.game.step();
+            this.renderer.draw();
+            this.lastTime = timestamp;
         }
 
-        return count;
+        this.animationId = requestAnimationFrame(this.loop);
     }
 
     start() {
-        if (this.gameActive) return false;
-        console.log("Game started");
-
-        this.gameActive = true;
-        this.myInterval = setInterval(this.updateFunc, this.delay);
-
-        return false;
+        if (this.isRunning) return;
+        this.isRunning = true;
+        this.lastTime = performance.now();
+        this.animationId = requestAnimationFrame(this.loop);
     }
 
     pause() {
-        if (!this.gameActive) return false;
-        console.log("Game paused");
-
-        this.gameActive = false;
-        clearInterval(this.myInterval);
-        return false;
+        this.isRunning = false;
+        if (this.animationId) cancelAnimationFrame(this.animationId);
     }
 
     reset() {
-        this.gameActive = false;
-        clearInterval(this.myInterval);
-
-        this.clear();
-        this.board.clear();
-        return false;
+        this.pause();
+        this.game.clear();
+        this.renderer.draw();
     }
 
     fillRandom() {
-        if (this.gameActive) return false;
-        for (var i = 0; i < this.cells.length; i++) {
-            for (var j = 0; j < this.cells[i].length; j++) {
-                this.cells[i][j].state = Math.random() >= 0.5;
-            }
-        }
-
-        this.board.print();
-        return false;
+        this.pause();
+        this.game.fillRandom();
+        this.renderer.draw();
     }
 
-    clear() {
-        for (var i = 0; i < this.cells.length; i++) {
-            for (var j = 0; j < this.cells[i].length; j++) {
-                this.cells[i][j].state = false;
-            }
-        }
-    }
-}
-
-class Board {
-    constructor(canvas, width, height, cellSize, cells) {
-        this.width = width;
-        this.height = height;
-
-        this.canvas = canvas;
-        this.canvas.width = cellSize * width;
-        this.canvas.height = cellSize * height;
-        this.ctx = this.canvas.getContext('2d');
-        this.ctx.cellSize = cellSize;
-
-        this.cells = cells;
-
-        var clicking = false;
-
-        var self = this;
-
-        this.mouseHandlerDown = function () {
-            clicking = true;
-        };
-
-        this.mouseHandlerUp = function (event) {
-            var pos = getMousePos(self.canvas, event);
-
-            var i = Math.floor(pos.x / self.ctx.cellSize);
-            var j = Math.floor(pos.y / self.ctx.cellSize);
-
-            self.cells[i][j].state = !self.cells[i][j].state;
-
-            self.print(self.cells[i][j]);
-
-            clicking = false;
-        };
-
-        this.mouseHandlerMove = function (event) {
-            if (clicking === false) return;
-            var pos = getMousePos(self.canvas, event);
-
-            var i = Math.floor(pos.x / self.ctx.cellSize);
-            var j = Math.floor(pos.y / self.ctx.cellSize);
-
-            if (self.cells[i][j].state) return;
-            self.cells[i][j].state = true;
-
-            self.print(self.cells[i][j]);
-        };
-
-        this.canvas.addEventListener('mousedown', this.mouseHandlerDown);
-
-        this.canvas.addEventListener('mouseup', this.mouseHandlerUp);
-
-        this.canvas.addEventListener('mousemove', this.mouseHandlerMove);
-
-
-        function getMousePos(c, evt) {
-            var rect = c.getBoundingClientRect();
-            return {
-                x: evt.clientX - rect.left,
-                y: evt.clientY - rect.top
-            };
-        }
-    }
-
-    print(cell) {
-
-        if (typeof cell === "undefined") {
-            this.clear();
-
-            this.ctx.lineWidth = 2;
-            this.ctx.strokeStyle = 'lightblue'; 
-            for (var i = 0; i < this.cells.length; i++) {
-                for (var j = 0; j < this.cells[i].length; j++) {
-                    this.ctx.fillStyle = this.cells[i][j].state ? "black" : "white";
-                    this.ctx.fillRect(this.cells[i][j].x * this.ctx.cellSize, this.cells[i][j].y * this.ctx.cellSize, this.ctx.cellSize, this.ctx.cellSize); 
-                    this.ctx.strokeRect(this.cells[i][j].x * this.ctx.cellSize, this.cells[i][j].y * this.ctx.cellSize, this.ctx.cellSize, this.ctx.cellSize); 
-                }
-            }
-        }
-        else {
-            this.ctx.lineWidth = 2;
-            this.ctx.strokeStyle = 'lightblue';
-            this.ctx.fillStyle = cell.state ? "black" : "white";
-            this.ctx.fillRect(cell.x * this.ctx.cellSize, cell.y * this.ctx.cellSize, this.ctx.cellSize, this.ctx.cellSize);
-            this.ctx.strokeRect(cell.x * this.ctx.cellSize, cell.y * this.ctx.cellSize, this.ctx.cellSize, this.ctx.cellSize);
-        }
-    }
-
-    clear() {
-        this.ctx.fillStyle = "white";
-        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-        this.ctx.lineWidth = 2;
-        this.ctx.strokeStyle = 'lightblue';
-        var i = 0;
-        this.ctx.beginPath();
-        for (i = 0; i <= this.width; i++) {
-            this.ctx.moveTo(i * this.ctx.cellSize, 0);
-            this.ctx.lineTo(i * this.ctx.cellSize, this.canvas.height);
-        }
-        for (i = 0; i <= this.height; i++) {
-            this.ctx.moveTo(0, i * this.ctx.cellSize);
-            this.ctx.lineTo(this.canvas.width, i * this.ctx.cellSize);
-        }
-        this.ctx.stroke();
-    }
-}
-
-class Cell {
-    constructor(x, y, state = false, age = 0) {
-        this.state = state;
-        this.x = x;
-        this.y = y;
-        this.age = age;
+    setDelay(newDelay) {
+        this.delay = Math.max(50, Math.min(3000, newDelay)); // clamp 50-3000
     }
 }
