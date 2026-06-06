@@ -1,49 +1,66 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <meta content="text/html;charset=utf-8" http-equiv="Content-Type">
-    <meta content="utf-8" http-equiv="encoding">
+    <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-    <title>Game of Life</title>
-    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.2.1/css/bootstrap.min.css" integrity="sha384-GJzZqFGwb1QTTN6wy59ffF1BuGJpLSa9DkKMp0DgiMDm4iYMj70gZWKYbI706tWS" crossorigin="anonymous">
-    <script src="https://code.jquery.com/jquery-3.3.1.slim.min.js" integrity="sha384-q8i/X+965DzO0rT7abK41JStQIAqVgRVzpbzo5smXKp4YfRvH+8abtTE1Pi6jizo" crossorigin="anonymous"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.6/umd/popper.min.js" integrity="sha384-wHAiFfRlMFy6i5SRaxvfOCifBUQy1xHdJ/yoi7FRNXMRBu5WHdZYu1hA6ZOblgut" crossorigin="anonymous"></script>
-    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.2.1/js/bootstrap.min.js" integrity="sha384-B0UglyR+jN6CkvvICOB2joaf5I4l3gm9GU6Hc1og6Ls7i6U/mkkaduKaBhlAXv9k" crossorigin="anonymous"></script>
-    <script src="GameOfLife.js"></script>
+    <title>Game of Life - Refactored</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        #grid {
+            user-select: none;
+            touch-action: none;
+        }
+    </style>
 </head>
-<body>
+<body class="bg-light py-4">
     <div class="container-fluid">
-        <div class="row">
-            <div class="mx-auto">
-                <div class="card">
-                    <h4 class="card-header text-center">
-                        Game of Life
+        <div class="row justify-content-center">
+            <div class="col-auto">
+                <div class="card shadow">
+                    <h4 class="card-header text-center bg-dark text-white">
+                        Conway's Game of Life
                     </h4>
-                    <div class="card-body text-center">
+                    
+                    <div class="card-body p-0 text-center">
                         <canvas id="grid"></canvas>     
-                        <script>
-                            var canvas = document.getElementById("grid");
-                            var game = new Game(canvas, 100, 100, 10, 200);
-                        </script>
                     </div>
-                    <div class="card-footer text-center">
-                        <label>Delay: </label>
-                        <input id="delayInput" type="number" min="50" max="3000"/>
-                        <script>
-                            $('#delayInput').val(window.game.delay);
-                            $('#delayInput').on('input',
-                                function() {
-                                    window.game.delay = Number($(this).val());
-                                });
-                        </script>
-                        <button class="btn btn-warning" onclick="game.fillRandom()">Fill</button>
-                        <button class="btn btn-primary" onclick="game.start()">Start</button>
-                        <button class="btn btn-secondary" onclick="game.pause()">Pause</button>
-                        <button class="btn btn-danger" onclick="game.reset()">Reset</button>
+                    
+                    <div class="card-footer d-flex justify-content-center align-items-center flex-wrap gap-2 py-3">
+                        <div class="input-group" style="width: auto;">
+                            <span class="input-group-text">Delay (ms)</span>
+                            <input id="delayInput" type="number" class="form-control" min="50" max="3000" style="max-width: 100px;">
+                        </div>
+                        
+                        <div class="btn-group">
+                            <button id="btnFill" class="btn btn-warning">Fill Random</button>
+                            <button id="btnStart" class="btn btn-success">Start</button>
+                            <button id="btnPause" class="btn btn-secondary">Pause</button>
+                            <button id="btnReset" class="btn btn-danger">Clear</button>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
     </div>
+
+    <script src="GameOfLife.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const canvas = document.getElementById("grid");
+        
+            const app = new GameController(canvas, 100, 100, 8, 100);
+            const delayInput = document.getElementById('delayInput');
+            delayInput.value = app.delay;
+            
+            delayInput.addEventListener('input', (e) => {
+                app.setDelay(Number(e.target.value));
+            });
+
+            document.getElementById('btnFill').addEventListener('click', () => app.fillRandom());
+            document.getElementById('btnStart').addEventListener('click', () => app.start());
+            document.getElementById('btnPause').addEventListener('click', () => app.pause());
+            document.getElementById('btnReset').addEventListener('click', () => app.reset());
+        });
+    </script>
 </body>
 </html>
