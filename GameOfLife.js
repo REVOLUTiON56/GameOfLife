@@ -1,134 +1,117 @@
+// 1. Ядро логики (Zero-Allocation, кэш-оптимизированные вычисления)
 class GameOfLife {
     constructor(width, height) {
         this.width = width;
         this.height = height;
         this.size = width * height;
         
-        // 0 - мертвая клетка, 1 - живая.
         this.grid = new Uint8Array(this.size);
         this.nextGrid = new Uint8Array(this.size);
     }
 
-    // Преобразование 2D координат в 1D индекс
-    getIndex(x, y) {
-        return y * this.width + x;
-    }
-
-    // Заполнение случайными значениями
     fillRandom() {
         for (let i = 0; i < this.size; i++) {
             this.grid[i] = Math.random() > 0.5 ? 1 : 0;
         }
     }
 
-    // Очистка поля
     clear() {
         this.grid.fill(0);
+        this.nextGrid.fill(0);
     }
 
     getCell(x, y) {
         if (x < 0 || x >= this.width || y < 0 || y >= this.height) return 0;
-        return this.grid[this.getIndex(x, y)];
+        return this.grid[y * this.width + x];
     }
 
-    // Установить конкретное состояние (0 или 1)
     setCell(x, y, state) {
         if (x < 0 || x >= this.width || y < 0 || y >= this.height) return;
-        this.grid[this.getIndex(x, y)] = state;
+        this.grid[y * this.width + x] = state;
     }
 
-    // Шаг эволюции (расчет следующего поколения)
     step() {
-        for (let y = 0; y < this.height; y++) {
-            for (let x = 0; x < this.width; x++) {
-                const idx = this.getIndex(x, y);
-                let neighbors = 0;
+        const w = this.width;
+        const h = this.height;
+        const current = this.grid;
+        const next = this.nextGrid;
 
-                // Быстрый подсчет соседей без создания лишних объектов
-                const top = y > 0;
-                const bottom = y < this.height - 1;
-                const left = x > 0;
-                const right = x < this.width - 1;
+        for (let y = 0; y < h; y++) {
+            // Предрасчет индексов смещения строк для минимизации математики в итерациях по X
+            const row = y * w;
+            const topRow = (y > 0 ? y - 1 : 0) * w;
+            const bottomRow = (y < h - 1 ? y + 1 : y) * w;
 
-                if (top && left && this.grid[idx - this.width - 1]) neighbors++;
-                if (top && this.grid[idx - this.width]) neighbors++;
-                if (top && right && this.grid[idx - this.width + 1]) neighbors++;
+            for (let x = 0; x < w; x++) {
+                const left = x > 0 ? x - 1 : 0;
+                const right = x < w - 1 ? x + 1 : x;
+
+                // Суммируем значения соседей напрямую из типизированного массива
+                const neighbors = 
+                    current[topRow + left] + current[topRow + x] + current[topRow + right] +
+                    current[row + left] +                          current[row + right] +
+                    current[bottomRow + left] + current[bottomRow + x] + current[bottomRow + right];
+
+                const idx = row + x;
                 
-                if (left && this.grid[idx - 1]) neighbors++;
-                if (right && this.grid[idx + 1]) neighbors++;
-                
-                if (bottom && left && this.grid[idx + this.width - 1]) neighbors++;
-                if (bottom && this.grid[idx + this.width]) neighbors++;
-                if (bottom && right && this.grid[idx + this.width + 1]) neighbors++;
-
-                // Применение правил Конвея
-                const isAlive = this.grid[idx] === 1;
-                if (isAlive && (neighbors === 2 || neighbors === 3)) {
-                    this.nextGrid[idx] = 1; // Выживает
-                } else if (!isAlive && neighbors === 3) {
-                    this.nextGrid[idx] = 1; // Зарождается
+                // Ветвление по правилам игры без создания промежуточных переменных
+                if (current[idx] === 1) {
+                    next[idx] = (neighbors === 2 || neighbors === 3) ? 1 : 0;
                 } else {
-                    this.nextGrid[idx] = 0; // Умирает (от одиночества или перенаселения)
+                    next[idx] = (neighbors === 3) ? 1 : 0;
                 }
             }
         }
 
-        [this.grid, this.nextGrid] = [this.nextGrid, this.grid];
+        // Атомарная смена указателей на массивы буферов
+        this.grid = next;
+        this.nextGrid = current;
     }
 }
 
+// 2. Попиксельный рендерер через 32-битный буфер ImageData
 class GameRenderer {
-    constructor(canvas, game, cellSize) {
+    constructor(canvas, game) {
         this.canvas = canvas;
         this.ctx = canvas.getContext('2d');
         this.game = game;
-        this.cellSize = cellSize;
 
-        this.canvas.width = game.width * cellSize;
-        this.canvas.height = game.height * cellSize;
+        // Физический размер холста строго равен логическому размеру сетки
+        this.canvas.width = game.width;
+        this.canvas.height = game.height;
+
+        // Создаем структуру ImageData для работы с пикселями напрямую
+        this.imageData = this.ctx.createImageData(game.width, game.height);
+        
+        // Создаем 32-битное представление (View) поверх того же буфера памяти ImageData
+        // Это позволяет управлять RGBA каналами пикселя за одну операцию записи
+        this.buf32 = new Uint32Array(this.imageData.data.buffer);
+
+        // Цвета в формате 0xAABBGGRR (Little-endian порядок байт для большинства систем)
+        this.COLOR_ALIVE = 0xFF000000; // Черный (Alpha=255, B=0, G=0, R=0)
+        this.COLOR_DEAD = 0xFFFFFFFF;  // Белый (Alpha=255, B=255, G=255, R=255)
     }
 
     draw() {
-        // Очищаем фон
-        this.ctx.fillStyle = '#ffffff';
-        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        const size = this.game.size;
+        const grid = this.game.grid;
+        const buf32 = this.buf32;
 
-        // Рисуем сетку (оптимизировано: рисуем только линии, а не квадраты)
-        this.ctx.strokeStyle = '#add8e6'; // lightblue
-        this.ctx.lineWidth = 1;
-        this.ctx.beginPath();
-        for (let x = 0; x <= this.canvas.width; x += this.cellSize) {
-            this.ctx.moveTo(x, 0);
-            this.ctx.lineTo(x, this.canvas.height);
+        // Линейный перенос состояния сетки в пиксельный буфер
+        for (let i = 0; i < size; i++) {
+            buf32[i] = grid[i] === 1 ? this.COLOR_ALIVE : this.COLOR_DEAD;
         }
-        for (let y = 0; y <= this.canvas.height; y += this.cellSize) {
-            this.ctx.moveTo(0, y);
-            this.ctx.lineTo(this.canvas.width, y);
-        }
-        this.ctx.stroke();
 
-        // Рисуем только живые клетки
-        this.ctx.fillStyle = '#000000';
-        for (let i = 0; i < this.game.size; i++) {
-            if (this.game.grid[i] === 1) {
-                const x = i % this.game.width;
-                const y = Math.floor(i / this.game.width);
-                this.ctx.fillRect(
-                    x * this.cellSize, 
-                    y * this.cellSize, 
-                    this.cellSize, 
-                    this.cellSize
-                );
-            }
-        }
+        // Выгружаем готовый массив пикселей на экран за одну операцию
+        this.ctx.putImageData(this.imageData, 0, 0);
     }
 }
 
-// 3. Контроллер (Управление состоянием, циклом и событиями)
+// 3. Контроллер управления (События мыши с учетом масштабирования CSS)
 class GameController {
-    constructor(canvas, width, height, cellSize, delay) {
+    constructor(canvas, width, height, delay) {
         this.game = new GameOfLife(width, height);
-        this.renderer = new GameRenderer(canvas, this.game, cellSize);
+        this.renderer = new GameRenderer(canvas, this.game);
         
         this.delay = delay;
         this.isRunning = false;
@@ -136,32 +119,31 @@ class GameController {
         this.animationId = null;
         this.isDrawing = false;
 
-        this.bindEvents(canvas, cellSize);
-        this.renderer.draw(); // Первичная отрисовка пустой сетки
+        this.bindEvents(canvas);
+        this.renderer.draw();
     }
 
-    bindEvents(canvas, cellSize) {
+    bindEvents(canvas) {
+        // Функция корректно рассчитывает индекс клетки, учитывая разницу 
+        // между физическим размером Canvas и его отображением на экране через CSS
         const getMousePos = (e) => {
             const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
             return {
-                x: Math.floor((e.clientX - rect.left) / cellSize),
-                y: Math.floor((e.clientY - rect.top) / cellSize)
+                x: Math.floor((e.clientX - rect.left) * scaleX),
+                y: Math.floor((e.clientY - rect.top) * scaleY)
             };
         };
 
-        // Режим кисти: 1 - рисуем (оживляем), 0 - стираем (убиваем)
         let drawMode = 1; 
 
         canvas.addEventListener('mousedown', (e) => {
             this.isDrawing = true;
             const pos = getMousePos(e);
-            
-            // Смотрим, куда кликнули. Если там живая клетка (1) - переключаемся в режим стирания (0).
-            // Если пустая (0) - переключаемся в режим рисования (1).
             const currentState = this.game.getCell(pos.x, pos.y);
             drawMode = currentState === 1 ? 0 : 1;
             
-            // Сразу применяем действие к клетке под курсором
             this.game.setCell(pos.x, pos.y, drawMode);
             this.renderer.draw();
         });
@@ -169,20 +151,15 @@ class GameController {
         canvas.addEventListener('mousemove', (e) => {
             if (!this.isDrawing) return;
             const pos = getMousePos(e);
-            
-            // При движении применяем запомненный режим
             this.game.setCell(pos.x, pos.y, drawMode);
             this.renderer.draw();
         });
 
-        // Вешаем mouseup на window, чтобы рисование корректно прерывалось, 
-        // даже если курсор ушел за пределы canvas и кнопку отпустили там
         window.addEventListener('mouseup', () => {
             this.isDrawing = false;
         });
     }
 
-    // Игровой цикл с использованием requestAnimationFrame
     loop = (timestamp) => {
         if (!this.isRunning) return;
 
@@ -220,6 +197,6 @@ class GameController {
     }
 
     setDelay(newDelay) {
-        this.delay = Math.max(50, Math.min(3000, newDelay)); // clamp 50-3000
+        this.delay = Math.max(0, Math.min(3000, newDelay));
     }
 }
